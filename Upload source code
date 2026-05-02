@@ -1,0 +1,159 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <Adafruit_PN532.h>
+#include <SoftwareSerial.h>
+#include <Preferences.h>
+
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+
+Adafruit_PN532 nfc(8, 9);
+SoftwareSerial rfidSerial(44, -1);
+Preferences prefs;
+
+
+const int BTN_UP = 10, BTN_DOWN = 11, BTN_SEL = 12;
+const int MOD_PIN = 18, BUZZER_PIN = 7;
+
+
+int menuIndex = 0;
+int selectedKeyIndex = 0;
+const int MAX_KEYS = 10;
+uint8_t keysDB[MAX_KEYS][5];
+bool keyExists[MAX_KEYS];
+
+void beep(int duration = 100) {
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(duration);
+  digitalWrite(BUZZER_PIN, LOW);
+}
+
+void setup() {
+  Serial.begin(115200);
+  rfidSerial.begin(9600);
+  
+  pinMode(BTN_UP, INPUT_PULLUP);
+  pinMode(BTN_DOWN, INPUT_PULLUP);
+  pinMode(BTN_SEL, INPUT_PULLUP);
+  pinMode(MOD_PIN, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+  display.clearDisplay();
+  display.setTextColor(WHITE);
+  
+  nfc.begin();
+  nfc.SAMConfig();
+
+  
+  prefs.begin("rfid_vault", false);
+  for(int i=0; i<MAX_KEYS; i++) {
+    String keyName = "k" + String(i);
+    keyExists[i] = prefs.getBytes(keyName.c_str(), keysDB[i], 5) > 0;
+  }
+  
+  beep(200); 
+}
+
+void showMessage(String msg) {
+  display.clearDisplay();
+  display.setCursor(0, 20);
+  display.setTextSize(1);
+  display.println(msg);
+  display.display();
+}
+
+// دالة قراءة RFID 125kHz (RDM6300)
+void scanRFID() {
+  showMessage("Scanning 125kHz...\nPlace Tag Near Coil");
+  unsigned long start = millis();
+  while(millis() - start < 10000) { 
+    if (rfidSerial.available() > 0) {
+      uint8_t buffer[14];
+      if (rfidSerial.readBytes(buffer, 14) == 14) {
+        beep(150);
+        saveKeyToMemory(buffer); 
+        return;
+      }
+    }
+  }
+  showMessage("Timeout! No Tag Found");
+  delay(1000);
+}
+
+void saveKeyToMemory(uint8_t* rawData) {
+  int slot = -1;
+  for(int i=0; i<MAX_KEYS; i++) { if(!keyExists[i]) { slot = i; break; } }
+  
+  if(slot != -1) {
+    // منطق تحويل البيانات وحفظها في keysDB[slot]
+    // prefs.putBytes(keyName.c_str(), keysDB[slot], 5);
+    keyExists[slot] = true;
+    showMessage("Key Saved in Slot " + String(slot));
+    beep(300);
+  } else {
+    showMessage("Memory Full!");
+  }
+  delay(2000);
+}
+
+void emulateSelected() {
+  if(!keyExists[selectedKeyIndex]) {
+    showMessage("Slot is Empty!");
+    delay(1000);
+    return;
+  }
+  
+  showMessage("Emulating Key " + String(selectedKeyIndex) + "\nHold near reader...");
+  
+  while(digitalRead(BTN_SEL) == HIGH) { 
+    send_frame(keysDB[selectedKeyIndex]); 
+  }
+  beep(50);
+}
+ 
+void send_bit(bool bit) {
+  int half = 250; 
+  digitalWrite(MOD_PIN, bit ? LOW : HIGH);
+  delayMicroseconds(half);
+  digitalWrite(MOD_PIN, bit ? HIGH : LOW);
+  delayMicroseconds(half);
+}
+
+void send_frame(uint8_t* uid) {
+  for (int i = 0; i < 9; i++) send_bit(1); // Header
+  
+}
+
+void loop() {
+  display.clearDisplay();
+  display.setCursor(0,0);
+  display.println("FIRMWARE V1.0");
+  display.println("---------------------");
+  
+  String menu[] = {"1. Scan 125kHz", "2. Scan NFC", "3. Select Key: " + String(selectedKeyIndex), "4. Emulate Key", "5. Format All"};
+  
+  for(int i=0; i<5; i++) {
+    if(menuIndex == i) display.print("> "); else display.print("  ");
+    display.println(menu[i]);
+  }
+  display.display();
+
+  if(digitalRead(BTN_UP) == LOW) { menuIndex--; beep(30); delay(200); }
+  if(digitalRead(BTN_DOWN) == LOW) { menuIndex++; beep(30); delay(200); }
+  menuIndex = constrain(menuIndex, 0, 4);
+
+  if(digitalRead(BTN_SEL) == LOW) {
+    beep(100);
+    if(menuIndex == 0) scanRFID();
+    if(menuIndex == 1) /* دالة NFC مشابهة */;
+    if(menuIndex == 2) { selectedKeyIndex = (selectedKeyIndex + 1) % MAX_KEYS; }
+    if(menuIndex == 3) emulateSelected();
+    if(menuIndex == 4) { prefs.clear(); ESP.restart(); }
+    delay(200);
+  }
+}
