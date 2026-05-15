@@ -16,7 +16,7 @@ SoftwareSerial rfidSerial(44, -1);
 Preferences prefs;
 
 
-const int BTN_UP = 10, BTN_DOWN = 11, BTN_SEL = 12;
+const int BTN_UP = 35, BTN_DOWN = 36, BTN_SEL = 37;
 const int MOD_PIN = 18, BUZZER_PIN = 7;
 
 
