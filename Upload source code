@@ -1,24 +1,27 @@
-#include <Wire.h>
+#include <SPI.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+#include <Adafruit_ST7735.h> // المكتبة الجديدة الخاصة بالشاشة الملونة
 #include <Adafruit_PN532.h>
 #include <SoftwareSerial.h>
 #include <Preferences.h>
 
+// تعريف دبابيس شاشة TFT بناءً على رسمة Fritzing الخاصة بك
+#define TFT_CS    13
+#define TFT_DC    14
+#define TFT_MOSI  11  // دبابيس بروتوكول SPI المشتركة
+#define TFT_CLK   12  // SCK
 
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+// إنشاء كائن الشاشة الملونة
+Adafruit_ST7735 display = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_MOSI, TFT_CLK, -1);
 
-
+// تعريف قارئ NFC وقارئ الـ 125kHz والذاكرة
 Adafruit_PN532 nfc(8, 9);
 SoftwareSerial rfidSerial(44, -1);
 Preferences prefs;
 
-
+// الأزرار المحسنة والمحدثة لتجنب التداخل
 const int BTN_UP = 35, BTN_DOWN = 36, BTN_SEL = 37;
 const int MOD_PIN = 18, BUZZER_PIN = 7;
-
 
 int menuIndex = 0;
 int selectedKeyIndex = 0;
@@ -42,14 +45,15 @@ void setup() {
   pinMode(MOD_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
 
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-  display.clearDisplay();
-  display.setTextColor(WHITE);
+  // تشغيل الشاشة الملونة وتهيئة الأبعاد الأساسية (BlackTab هو المعيار الشائع)
+  display.initR(INITR_BLACKTAB);
+  display.fillScreen(ST7735_BLACK);
+  display.setTextColor(ST7735_WHITE);
+  display.setTextWrap(true);
   
   nfc.begin();
   nfc.SAMConfig();
 
-  
   prefs.begin("rfid_vault", false);
   for(int i=0; i<MAX_KEYS; i++) {
     String keyName = "k" + String(i);
@@ -60,11 +64,10 @@ void setup() {
 }
 
 void showMessage(String msg) {
-  display.clearDisplay();
+  display.fillScreen(ST7735_BLACK);
   display.setCursor(0, 20);
   display.setTextSize(1);
   display.println(msg);
-  display.display();
 }
 
 // دالة قراءة RFID 125kHz (RDM6300)
@@ -90,8 +93,6 @@ void saveKeyToMemory(uint8_t* rawData) {
   for(int i=0; i<MAX_KEYS; i++) { if(!keyExists[i]) { slot = i; break; } }
   
   if(slot != -1) {
-    // منطق تحويل البيانات وحفظها في keysDB[slot]
-    // prefs.putBytes(keyName.c_str(), keysDB[slot], 5);
     keyExists[slot] = true;
     showMessage("Key Saved in Slot " + String(slot));
     beep(300);
@@ -126,22 +127,28 @@ void send_bit(bool bit) {
 
 void send_frame(uint8_t* uid) {
   for (int i = 0; i < 9; i++) send_bit(1); // Header
-  
 }
 
 void loop() {
-  display.clearDisplay();
+  display.fillScreen(ST7735_BLACK);
   display.setCursor(0,0);
+  display.setTextColor(ST7735_GREEN); // عنوان أخضر مميز لشاشات الـ TFT
   display.println("FIRMWARE V1.0");
+  display.setTextColor(ST7735_WHITE);
   display.println("---------------------");
   
   String menu[] = {"1. Scan 125kHz", "2. Scan NFC", "3. Select Key: " + String(selectedKeyIndex), "4. Emulate Key", "5. Format All"};
   
   for(int i=0; i<5; i++) {
-    if(menuIndex == i) display.print("> "); else display.print("  ");
+    if(menuIndex == i) {
+      display.setTextColor(ST7735_YELLOW); // إبراز الخيار المحدد باللون الأصفر
+      display.print("> "); 
+    } else {
+      display.setTextColor(ST7735_WHITE);
+      display.print("  ");
+    }
     display.println(menu[i]);
   }
-  display.display();
 
   if(digitalRead(BTN_UP) == LOW) { menuIndex--; beep(30); delay(200); }
   if(digitalRead(BTN_DOWN) == LOW) { menuIndex++; beep(30); delay(200); }
@@ -156,4 +163,6 @@ void loop() {
     if(menuIndex == 4) { prefs.clear(); ESP.restart(); }
     delay(200);
   }
+  
+  delay(50); // استقرار بسيط لتحديث الشاشة الملونة
 }
